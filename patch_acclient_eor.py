@@ -44,7 +44,26 @@ EXPECTED_INPUT_SIZE   = 4841472
 EXPECTED_OUTPUT_SHA256 = "69ac75174a0ea0f5a1fcd1c17bad2a562fad6439e984f05ff103a44e02bf4fc1"
 EXPECTED_OUTPUT_SIZE   = 4841472   # same — only in-place NOPs
 
+# The change in plain C:
+#
+#     Palette* Palette::makeModifiedPalette() {
+#         void* p = operator new(0x48);
+#         if (p == NULL) return NULL;
+#         Palette::Palette(p, 0x800);     // ctor: p->refcount = 1
+#   -     p->refcount += 1;                // <-- BUG: removed by this patch
+#         return p;
+#     }
+#
+# At the machine level, `p->refcount += 1` (with refcount at object
+# offset +0x24) compiles to a 3-byte `inc dword [reg+0x24]`. We replace
+# those 3 bytes with `90 90 90` (three NOPs) so the increment is
+# skipped while the surrounding instructions and the function size are
+# unchanged.
+#
 # (file_offset, original_bytes, patched_bytes)
+# Both sites are the same statement in two overloads of makeModifiedPalette:
+#   0x13effe (no-arg overload): inc dword [eax+0x24]  -> NOP NOP NOP
+#   0x13f19c (id, sub overload): inc dword [esi+0x24]  -> NOP NOP NOP
 PATCHES = [
     (0x0013effe, bytes([0xff, 0x40, 0x24]), bytes([0x90, 0x90, 0x90])),
     (0x0013f19c, bytes([0xff, 0x46, 0x24]), bytes([0x90, 0x90, 0x90])),

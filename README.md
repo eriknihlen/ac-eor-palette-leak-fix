@@ -26,21 +26,52 @@ instances** holding ~446 MB of orphaned ARGB buffers. Over multiple
 days of play, the leak walks the 32-bit client into its 2 GB virtual
 ceiling and the process crashes.
 
-## What does the patch do?
+## What the patch does (as code)
 
-It NOPs the buggy `inc dword [reg+0x24]` instruction at the end of
-both `makeModifiedPalette` overloads:
+Both 2013 (full PDB available) and EoR have an identical
+structural bug. The decompiled body looks like this:
 
-| File offset | Function | Original | Patched |
-|-------------|----------|---------|---------|
-| `0x13EFFE` | `Palette::makeModifiedPalette()` | `FF 40 24` | `90 90 90` |
-| `0x13F19C` | `Palette::makeModifiedPalette(DataID, Subpalette*)` | `FF 46 24` | `90 90 90` |
+```c
+// Palette::makeModifiedPalette()   — no-arg overload
+// EoR address 0x0053EFE0, 2013 address 0x0053E280
 
-Six bytes total. The function still returns the new palette
-pointer — but now at `refcount = 1` like every other constructor.
-The existing release path then brings it to 0 and destroys it
-correctly when no longer used. The reference counting and all other
-logic in the program is untouched.
+Palette* Palette::makeModifiedPalette() {
+    void* p = operator new(0x48);          // allocate 72-byte Palette
+    if (p == NULL) return NULL;
+
+    Palette::Palette(p, 0x800);            // ctor: sets p->refcount = 1
+    p->refcount += 1;                       // <-- BUG: extra refcount++
+                                            //     leaves p at refcount = 2
+                                            //     with nothing to match it
+    return p;
+}
+```
+
+The two-argument overload has the same shape, with the extra
+`refcount++` in the same position. **The patch removes that one
+line from each function.** After the patch:
+
+```c
+Palette* Palette::makeModifiedPalette() {
+    void* p = operator new(0x48);
+    if (p == NULL) return NULL;
+
+    Palette::Palette(p, 0x800);            // ctor: sets p->refcount = 1
+    // (the buggy p->refcount += 1 is gone)
+    return p;
+}
+```
+
+That's the whole change. Two `refcount++` statements deleted from
+two functions — one C statement each. The reference counting model
+and every other line of code in the program is left exactly as the
+original developers wrote it.
+
+In x86, `p->refcount += 1` where `refcount` is at object offset
+`+0x24` compiles to a 3-byte `inc dword [reg+0x24]` (encoded as
+`FF 40 24` or `FF 46 24` depending on whether the compiler picked
+EAX or ESI). Three bytes of NOP (`90 90 90`) take its place. Same
+instruction-pointer flow, just one operation deleted.
 
 ## Verifying the patch
 
@@ -168,6 +199,21 @@ multi-boxing) finally exposed it.
   crash for that bug)
 - Does not affect plugins, Decal, or anything else that hooks the
   client externally
+
+## Appendix: byte-level diff (for reproducibility)
+
+Two 3-byte windows in the `.text` section change. Listed here only
+for byte-exact reproducibility — the human meaning of the patch is
+in the "What the patch does (as code)" section above, not here.
+
+| File offset | VA | Function | Instruction | Original | Patched |
+|---|---|---|---|---|---|
+| `0x13EFFE` | `0x0053EFFE` | `Palette::makeModifiedPalette()` | `inc dword [eax+0x24]` | `FF 40 24` | `90 90 90` |
+| `0x13F19C` | `0x0053F19C` | `Palette::makeModifiedPalette(DataID, Subpalette*)` | `inc dword [esi+0x24]` | `FF 46 24` | `90 90 90` |
+
+(`+0x24` is the byte offset of the `refcount` field inside the
+inherited `DBObj` layout — set to 1 by `DBObj::DBObj` and incremented
+by `DBObj::AddRef`. Hand-verifiable from the 2013 PDB symbols.)
 
 ## License
 

@@ -38,7 +38,25 @@ import ctypes.wintypes as wt
 import sys
 
 
+# The change in plain C:
+#
+#     Palette* Palette::makeModifiedPalette() {
+#         void* p = operator new(0x48);
+#         if (p == NULL) return NULL;
+#         Palette::Palette(p, 0x800);     // ctor: p->refcount = 1
+#   -     p->refcount += 1;                // <-- BUG: removed by this patch
+#         return p;
+#     }
+#
+# At the machine level, `p->refcount += 1` (with refcount at object
+# offset +0x24) compiles to a 3-byte `inc dword [reg+0x24]`. We replace
+# those 3 bytes with `90 90 90` (three NOPs) so the increment is
+# skipped while the surrounding instructions are unchanged.
+#
 # (virtual_address, original_bytes, patched_bytes)
+# Both sites are the same statement in two overloads of makeModifiedPalette:
+#   VA 0x0053effe (no-arg overload):   inc dword [eax+0x24] -> NOP NOP NOP
+#   VA 0x0053f19c (id, sub overload):  inc dword [esi+0x24] -> NOP NOP NOP
 SITES = [
     (0x0053effe, bytes([0xff, 0x40, 0x24]), bytes([0x90, 0x90, 0x90])),
     (0x0053f19c, bytes([0xff, 0x46, 0x24]), bytes([0x90, 0x90, 0x90])),
