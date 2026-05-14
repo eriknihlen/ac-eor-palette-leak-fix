@@ -81,6 +81,8 @@ out of normal play sessions.
 
 ## How to apply
 
+### Option 1: Patch the binary on disk (persistent)
+
 1. Make sure you have Python 3 (no third-party packages needed)
 2. Close all running `acclient.exe` processes
 3. Run the patcher against your installed `acclient.exe`:
@@ -95,10 +97,39 @@ out of normal play sessions.
 4. Replace `acclient.exe` with `acclient.eor.patched.exe`
 5. Launch as normal
 
+### Option 2: Patch already-running clients (no restart needed)
+
+For testing the fix without swapping the binary, or for applying it
+to long-running clients without losing your session:
+
+```
+python patch_acclient_eor_runtime.py
+```
+
+With no arguments, it auto-discovers every running `acclient.exe`
+and patches them all in place via `WriteProcessMemory`. Useful flags:
+
+- `--pid <N>` — patch a specific process only
+- `--revert` — restore the original bytes
+- `--dry-run` — report what would change without writing
+
+The runtime patcher applies the exact same six bytes as the on-disk
+patcher; it just writes them into the running process's code pages
+instead of the file. It's idempotent and verifies the existing bytes
+before writing, so re-running it on an already-patched process is a
+no-op.
+
+The runtime patch is **non-persistent** — once the process exits,
+the next launch of `acclient.exe` reverts to unpatched. For a
+permanent fix, use Option 1.
+
 ## How to revert
 
-Replace `acclient.exe` with `acclient.eor.orig.exe`. Or recompute the
-patch — it's reproducible from any clean copy of the EoR `acclient.exe`.
+- On-disk: replace `acclient.exe` with `acclient.eor.orig.exe`. Or
+  recompute the patch — it's reproducible from any clean copy of the
+  EoR `acclient.exe`.
+- Runtime: `python patch_acclient_eor_runtime.py --revert` (or just
+  let the process exit).
 
 ## Why was this missed for so long?
 
