@@ -200,14 +200,6 @@ permanent fix, use Option 1.
 - Runtime: `python patch_acclient_eor_runtime.py --revert` (or just
   let the process exit).
 
-## Why was this missed for so long?
-
-The bug is in both the 2013 and 2017 (EoR) builds at the same
-structural location. It probably leaked in 2013 too, but typical play
-sessions back then were short enough that no one hit the 2 GB ceiling.
-EoR clients running multi-day uptimes (idle camping, harvesting,
-multi-boxing) finally exposed it.
-
 ## Discovery method
 
 1. Took a procdump of a 27-hour-uptime EoR client
