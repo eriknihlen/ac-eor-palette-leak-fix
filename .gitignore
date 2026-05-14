@@ -1,0 +1,29 @@
+# never commit any acclient.exe variants
+acclient.exe
+acclient.eor.orig.exe
+acclient.eor.patched.exe
+*.exe
+
+# nor any process dumps, debug symbols, or core files
+*.dmp
+*.pdb
+*.cab
+*.wer
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# secrets
+*.token
+.git-token
+*.key
+id_rsa
+id_ed25519
