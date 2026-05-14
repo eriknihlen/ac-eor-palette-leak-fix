@@ -29,20 +29,25 @@ ceiling and the process crashes.
 ## What the patch does (as code)
 
 Both 2013 (full PDB available) and EoR have an identical
-structural bug. The decompiled body looks like this:
+structural bug. The decompiled body of the no-arg overload:
 
 ```c
-// Palette::makeModifiedPalette()   — no-arg overload
+// Palette::makeModifiedPalette()
 // EoR address 0x0053EFE0, 2013 address 0x0053E280
 
 Palette* Palette::makeModifiedPalette() {
-    void* p = operator new(0x48);          // allocate 72-byte Palette
+    Palette* p = (Palette*)operator new(0x48);   // 72-byte Palette
     if (p == NULL) return NULL;
 
-    Palette::Palette(p, 0x800);            // ctor: sets p->refcount = 1
-    p->refcount += 1;                       // <-- BUG: extra refcount++
-                                            //     leaves p at refcount = 2
-                                            //     with nothing to match it
+    p = Palette::Palette(p, 0x800);              // ctor sets p->refcount = 1
+                                                 // and returns this
+    if (p != NULL) {                             // (ctor never actually returns
+                                                 //  NULL but compiled code
+                                                 //  still null-checks)
+        p->refcount += 1;                         // <-- BUG: extra refcount++
+                                                  //     leaves p at refcount=2
+                                                  //     with nothing to match
+    }
     return p;
 }
 ```
@@ -53,11 +58,13 @@ line from each function.** After the patch:
 
 ```c
 Palette* Palette::makeModifiedPalette() {
-    void* p = operator new(0x48);
+    Palette* p = (Palette*)operator new(0x48);
     if (p == NULL) return NULL;
 
-    Palette::Palette(p, 0x800);            // ctor: sets p->refcount = 1
-    // (the buggy p->refcount += 1 is gone)
+    p = Palette::Palette(p, 0x800);              // ctor sets p->refcount = 1
+    if (p != NULL) {
+        // (the buggy p->refcount += 1 is removed)
+    }
     return p;
 }
 ```
@@ -66,6 +73,37 @@ That's the whole change. Two `refcount++` statements deleted from
 two functions — one C statement each. The reference counting model
 and every other line of code in the program is left exactly as the
 original developers wrote it.
+
+For reference, the raw Ghidra decompile of the EoR no-arg overload,
+unmodified except for layout:
+
+```c
+int FUN_0053efe0(void) {
+    int iVar1 = FUN_005df0f5(0x48);              // operator new(0x48)
+    if (iVar1 != 0) {
+        iVar1 = FUN_0053ee60(0x800);              // ctor, returns this
+        if (iVar1 != 0) {
+            *(int *)(iVar1 + 0x24) =              // <-- BUG: refcount += 1
+                *(int *)(iVar1 + 0x24) + 1;       //     at offset +0x24
+        }
+        return iVar1;
+    }
+    return 0;
+}
+```
+
+And the matching 2013 PDB-symbolicated version, identical in structure:
+
+```c
+class Palette* Palette::makeModifiedPalette() {
+    void* eax = operator new(0x48);
+    if (eax == 0) return 0;
+    void* result = Palette::Palette(eax, 0x800);
+    if (result != 0)
+        *(uint32_t*)((char*)result + 0x24) += 1;  // <-- BUG
+    return result;
+}
+```
 
 In x86, `p->refcount += 1` where `refcount` is at object offset
 `+0x24` compiles to a 3-byte `inc dword [reg+0x24]` (encoded as

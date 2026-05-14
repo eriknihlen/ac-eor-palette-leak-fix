@@ -38,15 +38,21 @@ import ctypes.wintypes as wt
 import sys
 
 
-# The change in plain C:
+# The change in plain C (mirroring the actual decompile):
 #
 #     Palette* Palette::makeModifiedPalette() {
-#         void* p = operator new(0x48);
+#         Palette* p = (Palette*)operator new(0x48);
 #         if (p == NULL) return NULL;
-#         Palette::Palette(p, 0x800);     // ctor: p->refcount = 1
-#   -     p->refcount += 1;                // <-- BUG: removed by this patch
+#         p = Palette::Palette(p, 0x800);   // ctor: p->refcount = 1
+#         if (p != NULL) {
+#   -         p->refcount += 1;              // <-- BUG: removed by this patch
+#         }
 #         return p;
 #     }
+#
+# The `if (p != NULL)` after the ctor is a compiler-emitted defensive
+# check; the ctor never actually returns NULL. The bug is the increment
+# inside it.
 #
 # At the machine level, `p->refcount += 1` (with refcount at object
 # offset +0x24) compiles to a 3-byte `inc dword [reg+0x24]`. We replace
